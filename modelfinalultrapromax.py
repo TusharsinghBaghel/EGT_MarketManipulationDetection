@@ -31,6 +31,7 @@ def h(demand):
     #if demand = 1.15 -> 1.2
     #if demand = 1 -> 0.8
     return -13.34*demand*demand + 31.34*demand - 17.2
+# Demand factor function
 
 def g(arrival):
     #bw 0.8 and 1.2 
@@ -358,7 +359,7 @@ def normalizing_factor(row, marketIndex):
     groupNo = row['Week_Group']
 
     # Initialize the summation of payoffs
-    total_payoff = 0
+    payoff_diff = 0
     previous_year = row['year'] - 1
     try:
         current_payoff = grouped_markets[marketIndex][
@@ -374,23 +375,20 @@ def normalizing_factor(row, marketIndex):
         # Filter data for the same group number and years up to the current year -1
         relevant_data = market[(market['Week_Group'] == groupNo) & (market['year'] < year)]
 
-        
-        # Calculate the summation of payoffs for the relevant data
-        total_payoff += relevant_data['profit'].sum()
-    
-    num_years = len(relevant_data['year'].unique())
-    num_markets = len(grouped_markets)
-    nf = total_payoff - num_years*num_markets*current_payoff
+        # Iterate over each row in the relevant data
+        for _, row in relevant_data.iterrows():
+            iterated_profit = row['profit']
+            if current_payoff < iterated_profit:
+                payoff_diff += (iterated_profit - current_payoff)
+    nf = payoff_diff
     print(f"Normalizing factor for market {marketIndex} in year {year}, group {groupNo}: {nf}")
-    #return absolute value of nf
-    if nf < 0:
-        nf = -nf
+    
     return nf
 
 
 def predictedStrategy(row, market_index):
     # Create a log file to store structured data
-    log_file = "learning_log.csv"
+    log_file = "learnfromsuccess.csv"
     with open(log_file, "a") as f:
         # Write header if the file is empty
         if f.tell() == 0:
@@ -419,7 +417,7 @@ def predictedStrategy(row, market_index):
     final_strategy = current_strategy
     skipped_count = 0
     learning_count = 0
-    
+    sumofalphas = 0
     for market in grouped_markets:
         starting_year = min(market['year'])
         for past_year in range(starting_year, year):  
@@ -431,16 +429,24 @@ def predictedStrategy(row, market_index):
             payoff = market[(market['Week_Group'] == groupNo) & (market['year'] == past_year)]['profit'].values
             payoff_diff = payoff - current_payoff
             alpha = payoff_diff / normalizing_factor_value
-            strategy_diff = strategy - current_strategy
-            current_strategy = current_strategy + alpha * strategy_diff
-            learning_count += 1  # Increment learning count
+            sumofalphas += alpha
+            if alpha> 0 and alpha <=1:
+                #return major error
+                sumofalphas += alpha
+                strategy_diff = strategy - current_strategy
+                current_strategy = current_strategy + alpha * strategy_diff
+                learning_count += 1  # Increment learning count
+            elif alpha >1:
+                print("Error: Alpha value is greater than 1")
+            else:
+                print("Dont learn from mistakes")
 
     # Calculate strategy difference
     strategy_diff = current_strategy - older_strategy
 
     # Log the data to the file
     with open(log_file, "a") as f:
-        f.write(f"{markets[market_index]},{year},{groupNo},{skipped_count},{learning_count},{strategy_diff.tolist()},{current_strategy[0]},{current_strategy[1]},{current_strategy[2]},{current_strategy[3]}\n")
+        f.write(f"{markets[market_index]},{year},{groupNo},{skipped_count},{learning_count},{strategy_diff.tolist()},{current_strategy[0]},{current_strategy[1]},{current_strategy[2]},{current_strategy[3]},{normalizing_factor_value}{sumofalphas}\n")
 
     return current_strategy
 #print length of grouped markets
@@ -456,8 +462,21 @@ for i in range(len(grouped_markets)):
     # Now plot the predicted strategies for each market and each strategy section like lh, hl, ll, hh.
     # Also, x-axis is week group + year. Plot it in a sorted manner.
     # The graph should compare the actual strategy vs the predicted strategy.
-
 import plotly.express as px
+
+# Define the dynamic threshold functions
+def lower(freq):
+    ans = 1.216 + (-1.21984093)/(1 + (freq/0.7996073)**2.611871)
+    return max(0, ans)  # Example: lower threshold is 10% below the frequency
+
+def upper(freq):
+    ans = 3.983888 + (-3.7337411)/(1 + (freq/3.575102)**0.9983517)
+    return min(1, ans)  # Example: upper threshold is 10% above the frequency
+
+# File to log out-of-threshold data
+out_of_threshold_file = "out_of_threshold_strategies.csv"
+with open(out_of_threshold_file, "w") as f:
+    f.write("Market,GroupNo,Year,Strategy,ActualValue,LowerThreshold,UpperThreshold\n")
 
 for i in range(len(grouped_markets)):
     market_data = grouped_markets[i]
@@ -504,11 +523,50 @@ for i in range(len(grouped_markets)):
             row=idx + 1, col=1
         )
 
+        # Lower threshold
+        fig.add_trace(
+            go.Scatter(
+                x=market_data['Week_Group_Year'],
+                y=market_data[predicted].apply(lower),
+                mode='lines',
+                name=f'Lower Threshold {predicted}',
+                line=dict(color='green', dash='dash')
+            ),
+            row=idx + 1, col=1
+        )
+
+        # Upper threshold
+        fig.add_trace(
+            go.Scatter(
+                x=market_data['Week_Group_Year'],
+                y=market_data[predicted].apply(upper),
+                mode='lines',
+                name=f'Upper Threshold {predicted}',
+                line=dict(color='red', dash='dash')
+            ),
+            row=idx + 1, col=1
+        )
+
+        # Log out-of-threshold data
+    for _, row in market_data.iterrows():
+        out_of_range = True
+        for actual, predicted in zip(strategies, predicted_strategies):
+            actual_value = row[actual]
+            lower_threshold = lower(row[predicted])
+            upper_threshold = upper(row[predicted])
+            if lower_threshold <= actual_value <= upper_threshold:
+                out_of_range = False
+                break  # If any strategy is within range, skip this row
+
+        if out_of_range:
+            with open(out_of_threshold_file, "a") as f:
+                f.write(f"{markets[i]},{row['Week_Group']},{row['year']},ALL,{','.join([str(row[actual]) for actual in strategies])},{','.join([str(lower(row[predicted])) for predicted in predicted_strategies])},{','.join([str(upper(row[predicted])) for predicted in predicted_strategies])}\n")
+
     # Update layout
     fig.update_layout(
         height=1200,
         width=1000,
-        title_text=f"Actual vs Predicted Strategies for Market {markets[i]}",
+        title_text=f"Actual vs Predicted Strategies with Thresholds for Market {markets[i]}",
         xaxis_title="Week Group + Year",
         yaxis_title="Frequency",
         showlegend=True
@@ -516,4 +574,3 @@ for i in range(len(grouped_markets)):
 
     # Show the plot
     fig.show()
-

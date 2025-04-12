@@ -30,7 +30,7 @@ def assign_strategy(row, market_index):
 def h(demand):
     #if demand = 1.15 -> 1.2
     #if demand = 1 -> 0.8
-    return -13.34*demand*demand + 31.34*demand - 17.2
+    return 2.67*demand - 1.87
 
 def g(arrival):
     #bw 0.8 and 1.2 
@@ -318,7 +318,7 @@ for i in range(len(df_market)):
     
     # Add week and year columns
     df_market[i]['Week'] = df_market[i]['Reported Date'].dt.isocalendar().week
-    df_market[i]['year'] = df_market[i]['Reported Date'].dt.year
+    df_market[i]['Year'] = df_market[i]['Reported Date'].dt.year
     
     # Calculate the minimum date across all markets
     
@@ -326,10 +326,11 @@ for i in range(len(df_market)):
     df_market[i]['Week_Group'] = (df_market[i]['Reported Date'].dt.dayofyear // 21)
     
     # Group by Week_Group and calculate frequency ratios for each strategy
-    grouped = df_market[i].groupby(['Week_Group', 'year']).agg({
+    grouped = df_market[i].groupby('Week_Group').agg({
         'Reported Date': lambda x: f"{x.min().date()} to {x.max().date()}",
         'Strategy': lambda x: x.value_counts(normalize=True).to_dict(),
         'month': 'first',
+        'year': 'first',
         'profit': 'sum'
     }).reset_index()
     
@@ -382,9 +383,6 @@ def normalizing_factor(row, marketIndex):
     num_markets = len(grouped_markets)
     nf = total_payoff - num_years*num_markets*current_payoff
     print(f"Normalizing factor for market {marketIndex} in year {year}, group {groupNo}: {nf}")
-    #return absolute value of nf
-    if nf < 0:
-        nf = -nf
     return nf
 
 
@@ -453,67 +451,62 @@ for i in range(len(grouped_markets)):
     grouped_markets[i]['predicted_hArrival_lPrice'] = predicted_strategies.apply(lambda x: x[2])
     grouped_markets[i]['predicted_hArrival_hPrice'] = predicted_strategies.apply(lambda x: x[3])
 
-    # Now plot the predicted strategies for each market and each strategy section like lh, hl, ll, hh.
-    # Also, x-axis is week group + year. Plot it in a sorted manner.
-    # The graph should compare the actual strategy vs the predicted strategy.
+# Plot separate comparisons for each strategy column (actual vs predicted) for each market using Plotly
+# Define strategy columns
+strategy_columns = ['lArrival_lPrice', 'lArrival_hPrice', 'hArrival_lPrice', 'hArrival_hPrice']
+predicted_columns = ['predicted_lArrival_lPrice', 'predicted_lArrival_hPrice', 'predicted_hArrival_lPrice', 'predicted_hArrival_hPrice']
 
-import plotly.express as px
+# Sort grouped_markets by 'year' and 'Week_Group' to ensure chronological order
+for market in grouped_markets:
+    market.sort_values(by=['year', 'Week_Group'], inplace=True)
 
-for i in range(len(grouped_markets)):
-    market_data = grouped_markets[i]
-    market_data['Week_Group_Year'] = market_data['Week_Group'].astype(str) + "-" + market_data['year'].astype(str)
-    market_data = market_data.sort_values(by=['year', 'Week_Group'])
+# Create a subplot for each strategy column
+for strategy, predicted in zip(strategy_columns, predicted_columns):
+    fig = make_subplots(rows=len(grouped_markets), cols=1, shared_xaxes=True, 
+                        subplot_titles=[f"{markets[i]} - {strategy}" for i in range(len(grouped_markets))])
 
-    # Create a subplot for each strategy
-    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, subplot_titles=[
-        'Low Arrival Low Price (Actual vs Predicted)',
-        'Low Arrival High Price (Actual vs Predicted)',
-        'High Arrival Low Price (Actual vs Predicted)',
-        'High Arrival High Price (Actual vs Predicted)'
-    ])
-
-    # Add traces for each strategy
-    strategies = ['lArrival_lPrice', 'lArrival_hPrice', 'hArrival_lPrice', 'hArrival_hPrice']
-    predicted_strategies = [
-        'predicted_lArrival_lPrice', 'predicted_lArrival_hPrice',
-        'predicted_hArrival_lPrice', 'predicted_hArrival_hPrice'
-    ]
-
-    for idx, (actual, predicted) in enumerate(zip(strategies, predicted_strategies)):
-        # Actual strategy
+    for i, market in enumerate(grouped_markets):
+        # Add actual strategy trace
         fig.add_trace(
             go.Scatter(
-                x=market_data['Week_Group_Year'],
-                y=market_data[actual],
-                mode='lines+markers',
-                name=f'Actual {actual}',
+                x=market['Week_Group'], 
+                y=market[strategy], 
+                mode='lines+markers', 
+                name=f"Actual {strategy} - {markets[i]}",
                 line=dict(color='blue')
             ),
-            row=idx + 1, col=1
+            row=i+1, col=1
         )
-
-        # Predicted strategy
+        
+        # Add predicted strategy trace
         fig.add_trace(
             go.Scatter(
-                x=market_data['Week_Group_Year'],
-                y=market_data[predicted],
-                mode='lines+markers',
-                name=f'Predicted {predicted}',
-                line=dict(color='orange', dash='dot')
+                x=market['Week_Group'], 
+                y=market[predicted], 
+                mode='lines+markers', 
+                name=f"Predicted {strategy} - {markets[i]}",
+                line=dict(color='red', dash='dot')
             ),
-            row=idx + 1, col=1
+            row=i+1, col=1
+        )
+
+        # Add year and month group labels to the x-axis
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=market['Week_Group'],
+            ticktext=[f"{row['year']} - {row['month']}" for _, row in market.iterrows()],
+            row=i+1, col=1,
+            categoryorder='array',  # Ensure sorting of x-axis labels
+            categoryarray=sorted(market['Week_Group'].unique())  # Sort by Week_Group
         )
 
     # Update layout
     fig.update_layout(
-        height=1200,
+        height=300 * len(grouped_markets),  # Adjust height based on the number of markets
         width=1000,
-        title_text=f"Actual vs Predicted Strategies for Market {markets[i]}",
-        xaxis_title="Week Group + Year",
-        yaxis_title="Frequency",
-        showlegend=True
+        title_text=f"Actual vs Predicted {strategy} for Each Market",
+        xaxis_title="Year - Month Group",
+        yaxis_title=f"{strategy} Frequency"
     )
 
-    # Show the plot
     fig.show()
-
