@@ -264,15 +264,17 @@ fig2.update_xaxes(title_text="Week", row=4, col=1)
 fig2.update_yaxes(title_text="Frequency")
 fig2.show()
 
-# Plot the average of the wholesale price and selling price for all the months of the year for Madhya Pradesh.
+# Plot the average of the wholesale price and selling price for all the months of the year for Madhya Pradesh, only for years 2021-2024.
 state_name = "Madhya Pradesh"
+years_to_plot = [2021, 2022, 2023, 2024]
 
-# Filter data for Madhya Pradesh from df_market
+# Filter data for Madhya Pradesh from df_market and only for selected years
 df_madhyapradesh = pd.concat([market for market in df_market if market['State'].iloc[0] == state_name])
-
-# Group by year and month, then calculate the average wholesale price and selling price
 df_madhyapradesh['Year'] = df_madhyapradesh['Reported Date'].dt.year
 df_madhyapradesh['Month'] = df_madhyapradesh['Reported Date'].dt.month
+df_madhyapradesh = df_madhyapradesh[df_madhyapradesh['Year'].isin(years_to_plot)]
+
+# Group by year and month, then calculate the average wholesale price and selling price
 monthly_avg_prices = df_madhyapradesh.groupby(['Year', 'Month']).agg({
     'wholeSalePrice': 'first',
     'sellingprice': 'mean'
@@ -292,18 +294,20 @@ for year in monthly_avg_prices['Year'].unique():
                    mode='lines+markers', name=f'Selling Price {year}', line=dict(dash='dot'))
     )
 
-# Update layout
+# Update layout with larger legend font
 fig3.update_layout(
-    title=f"Average Monthly Prices for {state_name} Across All Years",
+    title=f"Average Monthly Prices for {state_name} (2021-2024)",
     xaxis_title="Month",
     yaxis_title="Price",
     xaxis=dict(tickmode='array', tickvals=list(range(1, 13)), ticktext=[
         'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']),
     height=600,
-    width=800
+    width=800,
+    legend=dict(font=dict(size=20))
 )
 fig3.show()
-#add a column of month in  df_market[i] for each market i
+
+# Add a column of month in df_market[i] for each market i
 for i in range(len(df_market)):
     df_market[i]['month'] = df_market[i]['Reported Date'].dt.month_name()
 
@@ -449,6 +453,7 @@ def predictedStrategy(row, market_index):
         f.write(f"{markets[market_index]},{year},{groupNo},{skipped_count},{learning_count},{strategy_diff.tolist()},{current_strategy[0]},{current_strategy[1]},{current_strategy[2]},{current_strategy[3]},{normalizing_factor_value}{sumofalphas}\n")
 
     return current_strategy
+
 #print length of grouped markets
 print("Length of grouped markets: ", len(grouped_markets))
 
@@ -476,29 +481,33 @@ def upper(freq):
 # File to log out-of-threshold data
 out_of_threshold_file = "out_of_threshold_strategies.csv"
 with open(out_of_threshold_file, "w") as f:
-    f.write("Market,GroupNo,Year,Strategy,ActualValue,LowerThreshold,UpperThreshold\n")
+    f.write("Market,GroupNo,Year,Strategy,Actual_lArrival_lPrice,Actual_lArrival_hPrice,Actual_hArrival_lPrice,Actual_hArrival_hPrice,LowerThreshold_lArrival_lPrice,LowerThreshold_lArrival_hPrice,LowerThreshold_hArrival_lPrice,LowerThreshold_hArrival_hPrice,UpperThreshold_lArrival_lPrice,UpperThreshold_lArrival_hPrice,UpperThreshold_hArrival_lPrice,UpperThreshold_hArrival_hPrice\n")
+
+strategies = ['lArrival_lPrice', 'lArrival_hPrice', 'hArrival_lPrice', 'hArrival_hPrice']
+predicted_strategies = [
+    'predicted_lArrival_lPrice', 'predicted_lArrival_hPrice',
+    'predicted_hArrival_lPrice', 'predicted_hArrival_hPrice'
+]
+titles = [
+    'Low Arrival Low Price (Actual vs Predicted)',
+    'Low Arrival High Price (Actual vs Predicted)',
+    'High Arrival Low Price (Actual vs Predicted)',
+    'High Arrival High Price (Actual vs Predicted)'
+]
 
 for i in range(len(grouped_markets)):
+    if i != market_index:
+        continue
     market_data = grouped_markets[i]
     market_data['Week_Group_Year'] = market_data['Week_Group'].astype(str) + "-" + market_data['year'].astype(str)
     market_data = market_data.sort_values(by=['year', 'Week_Group'])
 
-    # Create a subplot for each strategy
-    fig = make_subplots(rows=4, cols=1, shared_xaxes=True, subplot_titles=[
-        'Low Arrival Low Price (Actual vs Predicted)',
-        'Low Arrival High Price (Actual vs Predicted)',
-        'High Arrival Low Price (Actual vs Predicted)',
-        'High Arrival High Price (Actual vs Predicted)'
-    ])
-
-    # Add traces for each strategy
-    strategies = ['lArrival_lPrice', 'lArrival_hPrice', 'hArrival_lPrice', 'hArrival_hPrice']
-    predicted_strategies = [
-        'predicted_lArrival_lPrice', 'predicted_lArrival_hPrice',
-        'predicted_hArrival_lPrice', 'predicted_hArrival_hPrice'
-    ]
+    # Filter out data before 2021
+    market_data = market_data[market_data['year'] >= 2021]
 
     for idx, (actual, predicted) in enumerate(zip(strategies, predicted_strategies)):
+        fig = go.Figure()
+
         # Actual strategy
         fig.add_trace(
             go.Scatter(
@@ -506,9 +515,9 @@ for i in range(len(grouped_markets)):
                 y=market_data[actual],
                 mode='lines+markers',
                 name=f'Actual {actual}',
-                line=dict(color='blue')
-            ),
-            row=idx + 1, col=1
+                line=dict(color='blue', width=4),
+                marker=dict(size=10)
+            )
         )
 
         # Predicted strategy
@@ -518,9 +527,9 @@ for i in range(len(grouped_markets)):
                 y=market_data[predicted],
                 mode='lines+markers',
                 name=f'Predicted {predicted}',
-                line=dict(color='orange', dash='dot')
-            ),
-            row=idx + 1, col=1
+                line=dict(color='orange', dash='dot', width=4),
+                marker=dict(size=10)
+            )
         )
 
         # Lower threshold
@@ -529,10 +538,9 @@ for i in range(len(grouped_markets)):
                 x=market_data['Week_Group_Year'],
                 y=market_data[predicted].apply(lower),
                 mode='lines',
-                name=f'Lower Threshold {predicted}',
-                line=dict(color='green', dash='dash')
-            ),
-            row=idx + 1, col=1
+                name=f'Lower Threshold',
+                line=dict(color='green', dash='dash', width=3)
+            )
         )
 
         # Upper threshold
@@ -541,36 +549,32 @@ for i in range(len(grouped_markets)):
                 x=market_data['Week_Group_Year'],
                 y=market_data[predicted].apply(upper),
                 mode='lines',
-                name=f'Upper Threshold {predicted}',
-                line=dict(color='red', dash='dash')
-            ),
-            row=idx + 1, col=1
+                name=f'Upper Threshold',
+                line=dict(color='red', dash='dash', width=3)
+            )
         )
 
         # Log out-of-threshold data
-    for _, row in market_data.iterrows():
-        out_of_range = True
-        for actual, predicted in zip(strategies, predicted_strategies):
+        for _, row in market_data.iterrows():
             actual_value = row[actual]
             lower_threshold = lower(row[predicted])
             upper_threshold = upper(row[predicted])
-            if lower_threshold <= actual_value <= upper_threshold:
-                out_of_range = False
-                break  # If any strategy is within range, skip this row
+            if not (lower_threshold <= actual_value <= upper_threshold):
+                with open(out_of_threshold_file, "a") as f:
+                    f.write(f"{markets[i]},{row['Week_Group']},{row['year']},{actual},{row['lArrival_lPrice']},{row['lArrival_hPrice']},{row['hArrival_lPrice']},{row['hArrival_hPrice']},{lower(row['predicted_lArrival_lPrice'])},{lower(row['predicted_lArrival_hPrice'])},{lower(row['predicted_hArrival_lPrice'])},{lower(row['predicted_hArrival_hPrice'])},{upper(row['predicted_lArrival_lPrice'])},{upper(row['predicted_lArrival_hPrice'])},{upper(row['predicted_hArrival_lPrice'])},{upper(row['predicted_hArrival_hPrice'])}\n")
 
-        if out_of_range:
-            with open(out_of_threshold_file, "a") as f:
-                f.write(f"{markets[i]},{row['Week_Group']},{row['year']},ALL,{','.join([str(row[actual]) for actual in strategies])},{','.join([str(lower(row[predicted])) for predicted in predicted_strategies])},{','.join([str(upper(row[predicted])) for predicted in predicted_strategies])}\n")
-
-    # Update layout
-    fig.update_layout(
-        height=1200,
-        width=1000,
-        title_text=f"Actual vs Predicted Strategies with Thresholds for Market {markets[i]}",
-        xaxis_title="Week Group + Year",
-        yaxis_title="Frequency",
-        showlegend=True
-    )
-
-    # Show the plot
-    fig.show()
+        fig.update_layout(
+            title_text=f"{titles[idx]} for Market X",
+            # title_text=f"{titles[idx]} for Market {markets[i]}",
+            xaxis_title="Week Group + Year",
+            yaxis_title="Frequency",
+            height=700,
+            width=1800,  # Broaden the diagram width
+            legend=dict(font=dict(size=18)),
+            font=dict(size=18),
+            title_font=dict(size=24),
+            margin=dict(l=60, r=40, t=80, b=60)
+        )
+        fig.update_xaxes(tickfont=dict(size=16), title_font=dict(size=20))
+        fig.update_yaxes(tickfont=dict(size=16), title_font=dict(size=20))
+        fig.show()
