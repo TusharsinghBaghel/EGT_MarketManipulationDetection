@@ -52,7 +52,7 @@ scaler = StandardScaler()
 X_scaled = scaler.fit_transform(pivot_table)
 
 # Apply Truncated SVD for Latent Vector Extraction
-svd = TruncatedSVD(n_components=3, random_state=42)  # Reduce to 5 latent dimensions
+svd = TruncatedSVD(n_components=3, random_state=42)  # Reduce to 3 latent dimensions
 latent_vectors = svd.fit_transform(X_scaled)
 
 # Compute cosine distances to find unique market-weeks
@@ -80,8 +80,16 @@ import plotly.express as px
 # Add a new column for Market IDs
 # Assign a unique index to each market
 market_index_mapping = {market: idx for idx, market in enumerate(unique_marketnames)}
-latent_vector_df["Market ID"] = latent_vector_df.index.map(lambda x: market_index_mapping.get(x.split("-")[0], -1))
 
+# Extract Market Name robustly (everything before the trailing '-YYYY-WWW')
+index_series = latent_vector_df.index.to_series()
+market_names_from_index = index_series.str.replace(r'-(\d+)-W\d+$', '', regex=True)
+latent_vector_df["Market Index"] = market_names_from_index.map(lambda m: market_index_mapping.get(m, -1))
+
+# Also extract Year and Week from the index for hover info
+year_week = index_series.str.extract(r'-(?P<Year>\d+)-W(?P<Week>\d+)$')
+latent_vector_df["Year"] = year_week["Year"].astype(str)
+latent_vector_df["Week"] = year_week["Week"].astype(str)
 # Create a 3D scatter plot with Market IDs as labels
 fig = px.scatter_3d(
     latent_vector_df,
@@ -89,25 +97,34 @@ fig = px.scatter_3d(
     y="Latent Dimension 2",
     z="Latent Dimension 3",
     color="Uniqueness Score",
-    # Use a high-contrast color scale
     size_max=10,
     title="3D Visualization of Latent Vectors and Uniqueness Scores",
-    hover_name=latent_vector_df.index.map(
-        lambda x: f"Market {market_index_mapping.get(x.split('-')[0], -1)}, Week {x.split('-')[-1][1:]}, Year {x.split('-')[-2]}"
-    )  # Add "Market i, Week w, Year y" as labels
+    hover_data=None,  # Remove all default hover data
+    # Provide only the desired fields in custom_data for hover
+    custom_data=["Market Index", "Week", "Year"]
 )
 
-# Update layout for better visualization
+fig.update_traces(
+    hovertemplate=(
+    "<b>market %{customdata[0]} - year %{customdata[2]} - week %{customdata[1]}</b><extra></extra>"
+    )
+)
+
 fig.update_layout(
     scene=dict(
-        xaxis=dict(title=dict(text="Latent Dimension 1", font=dict(size=15))),
-        yaxis=dict(title=dict(text="Latent Dimension 2", font=dict(size=15))),
-        zaxis=dict(title=dict(text="Latent Dimension 3", font=dict(size=15)))
+        xaxis=dict(title=dict(text="Latent Dim-1", font=dict(size=30))),
+        yaxis=dict(title=dict(text="Latent Dim-2", font=dict(size=30))),
+        zaxis=dict(title=dict(text="Latent Dim-3", font=dict(size=30)))
     ),
-    coloraxis_colorbar=dict(title="Uniqueness Score")
+    coloraxis_colorbar=dict(
+        title=dict(text="Uniqueness Score", font=dict(size=20)),
+        tickfont=dict(size=20)
+    ),
+    hoverlabel=dict(
+        font=dict(size=18)
+    )
 )
 
-# Show the plot
 fig.show()
 
 print(latent_vector_df)
